@@ -41,24 +41,30 @@ insert into bid (product_type, client_name, is_company, amount) values
 --Пример:
 --execute 'select * from product where product_type = $1 and is_company = $2' using 'credit', false;
 
+
+-- Решение с занятия
+
 do $$
 	declare
-		result_row record;
-		table_name varchar(50);
+		bid_row record;
 	begin
-	 	for result_row in (select is_company, product_type from bid) loop
-		  	if result_row.is_company = true then 
-			  	table_name = 'company_' || result_row.product_type;			     
-			else 
-				table_name = 'person_' || result_row.product_type;
-			end if;
-				execute 'create table if not exists ' || table_name || ' (id serial primary key, client_name varchar(50), amount numeric (12, 2))';  
-				execute 'insert into ' || table_name || ' (client_name, amount) select b.client_name, b.amount from bid b where b.product_type = $1 and b.is_company = $2 except select client_name, amount from ' || table_name 				
-				using result_row.product_type, result_row.is_company;
+	 	for bid_row in (
+		 	select distinct product_type, is_company,  
+			 case when is_company then 'company_' else 'person_' end || product_type as "t_name"
+			 from bid
+			 ) 
+			 loop		 
+			 	--  raise notice 't_name : %', bid_row.t_name;
+				execute 'create table ' || bid_row.t_name || ' (id serial primary key, client_name varchar(50), amount numeric (12, 2))'; 
+				execute 'insert into '|| bid_row.t_name || '(client_name, amount)'
+				|| 'select client_name, amount from bid where product_type = ''' || bid_row.product_type 
+				|| ''' and is_company = ' || bid_row.is_company;
 		end loop;	
 	end;
-$$
+$$;
 
+
+select * from company_credit
 --Скрипт №2 - Начисление процентов по кредитам за день
 --Создать скрипт, который:
 --1. Создаст(если нет) таблицу credit_percent для начисления процентов по кредитам: имя клиента, сумма начисленных процентов
@@ -68,35 +74,35 @@ $$
 -- необходимо выбрать client_name клиента и (сумму кредита * (базовую ставку + 0.05) / 365 для физ лиц
 --4. Печатает на экран общую сумму начисленных процентов в таблице
 
+drop table company_credit, company_deposit, person_credit, person_credit_card, person_debit_card, person_deposit;
+
+
 do $$
 	declare 
-	   base_rate numeric (10,1) := 0.1;
-	   person_rate numeric (10,1) := 0,15;
+	   base_rate numeric (12,2) := 0.1;
+	   person_rate numeric (12,2) := base_rate + 0.05;
 	   days_in_year int := 365;
-		begin
-			
+		begin			
 			create table if not exists credit_percent (client_name varchar(50), percent_sum numeric(12,2));
-			insert into credit_percent (client_name, percent_sum) 
-						(
-						select client_name, sum(amount * person_rate)/days_in_year)
+			insert into credit_percent (client_name, percent_sum)						
+						select client_name, amount * person_rate/days_in_year
 						from person_credit					
 						union all
-						select client_name, sum((amount * base_rate )/days_in_year) 
-						from company_credit						
-						);
-			raise notice 'Общая сумма начисленных процентов по кредиту - %', (select sum (percent_sum) as percents_sum from credit_percent);
+						select client_name, amount * base_rate/days_in_year 
+						from company_credit;
+			raise notice 'Общая сумма начисленных процентов по кредиту - %', (select sum (percent_sum) from credit_percent);
 		end;
-$$
+$$;
 
+delete from credit_percent;
+select * from credit_person;
 --Скрипт №3 - Разделение ответственности. 
 --Менеджеры компаний, должны видеть только заявки компаний.
 --Создать view которая отображает только заявки компаний
 
 create view company_bid as (
 	select * 
-	from company_credit
-	union
-	select *
-	from company_deposit
-);
+	from bid 
+	where is_company = true);
 
+select * from company_bid;
